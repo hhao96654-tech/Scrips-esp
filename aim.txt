@@ -1,0 +1,91 @@
+-- Server Script: Turret behavior (place inside a Model named "Turret" in Workspace)
+-- Model should have parts: "Base", "Head" (rotates horizontally), "Barrel" (rotates vertically / or used for origin)
+-- A BoolValue named "Enabled" can be used to turn turret on/off.
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+
+local turret = script.Parent
+local head = turret:WaitForChild("Head")
+local barrel = turret:WaitForChild("Barrel") -- used for firing origin
+local enabledValue = turret:FindFirstChild("Enabled") or Instance.new("BoolValue", turret)
+enabledValue.Name = "Enabled"
+enabledValue.Value = true
+
+-- Config
+local FIRE_RATE = 1.0            -- seconds between shots
+local RANGE = 200                -- studs detection range
+local AIM_SPEED = 6              -- higher = snappier
+local DAMAGE = 20
+
+-- helper: get nearest player's humanoid root in range
+local function getNearestTarget()
+	local nearestDist = RANGE
+	local targetCharacter, targetRoot = nil, nil
+	for _, player in pairs(Players:GetPlayers()) do
+		if player.Character and player.Character:FindFirstChild("HumanoidRootPart") and player.Character:FindFirstChild("Humanoid") then
+			local hrp = player.Character.HumanoidRootPart
+			local dist = (hrp.Position - head.Position).Magnitude
+			if dist <= nearestDist and player.Character.Humanoid.Health > 0 then
+				nearestDist = dist
+				targetCharacter = player.Character
+				targetRoot = hrp
+			end
+		end
+	end
+	return targetCharacter, targetRoot
+end
+
+-- firing function: raycast from barrel to target
+local function fireAt(targetPos)
+	local origin = barrel.Position
+	local direction = (targetPos - origin).Unit * RANGE
+	local params = RaycastParams.new()
+	params.FilterDescendantsInstances = {turret}
+	params.FilterType = Enum.RaycastFilterType.Blacklist
+	local result = Workspace:Raycast(origin, direction, params)
+	if result and result.Instance then
+		local hitPart = result.Instance
+		local humanoid = hitPart.Parent and hitPart.Parent:FindFirstChild("Humanoid")
+			or hitPart:FindFirstAncestorWhichIsA("Model") and hitPart:FindFirstAncestorWhichIsA("Model"):FindFirstChild("Humanoid")
+		if humanoid and humanoid.Health > 0 then
+			-- apply damage (server-side)
+			humanoid:TakeDamage(DAMAGE)
+		end
+	end
+	-- optional: create visual effect (not included)
+end
+
+-- aiming coroutine
+spawn(function()
+	local lastFire = 0
+	RunService.Heartbeat:Connect(function(dt)
+		if not enabledValue.Value then return end
+		local targetChar, targetRoot = getNearestTarget()
+		if targetRoot then
+			-- compute goal CFrame to look at target
+			local lookAt = CFrame.new(head.Position, Vector3.new(targetRoot.Position.X, head.Position.Y, targetRoot.Position.Z))
+			-- smoothly rotate head (yaw)
+			head.CFrame = head.CFrame:Lerp(lookAt, math.clamp(AIM_SPEED * dt, 0, 1))
+
+			-- if you want barrel pitch, compute local pitch towards target:
+			local direction = (targetRoot.Position - barrel.Position)
+			local distance = direction.Magnitude
+			local pitchCFrame = CFrame.new(barrel.Position, targetRoot.Position)
+			-- combine yaw from head and pitch from pitchCFrame for barrel orientation:
+			local combined = CFrame.new(head.Position) * (head.CFrame - head.CFrame.p):Inverse() * pitchCFrame
+			-- (Alternatively set barrel.CFrame directly if your model supports it)
+			-- Smoothly adjust barrel if desired:
+			-- barrel.CFrame = barrel.CFrame:Lerp(pitchCFrame, math.clamp(AIM_SPEED * dt, 0, 1))
+
+			-- Fire if roughly aimed and cooldown passed
+			local aimDot = (head.CFrame.LookVector):Dot((targetRoot.Position - head.Position).Unit)
+			local now = tick()
+			if aimDot > 0.98 and now - lastFire >= FIRE_RATE then
+				lastFire = now
+				fireAt(targetRoot.Position)
+			end
+		end
+	end)
+end)
