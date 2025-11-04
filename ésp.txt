@@ -1,0 +1,61 @@
+-- HighlightToggleGUI.lua (LocalScript in StarterGui)
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local player = Players.LocalPlayer
+local REMOTE_NAME = "ToggleHighlightsEvent"
+
+-- Adjust to match the same admin UserIds you put on the server (purely cosmetic on client)
+local ADMINS_LOCAL = {
+    [12345678] = true, -- replace with your UserId
+}
+
+-- Wait for the remote to exist (server script creates it if missing)
+local toggleEvent = ReplicatedStorage:WaitForChild(REMOTE_NAME)
+
+-- Create simple ScreenGui with a small toggle button
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "HighlightToggleGui"
+screenGui.ResetOnSpawn = false
+screenGui.Parent = player:WaitForChild("PlayerGui")
+
+-- Only show GUI to admins (cosmetic; server still enforces)
+if not ADMINS_LOCAL[player.UserId] then
+    -- do not create the visible UI for non-admins
+    return
+end
+
+local frame = Instance.new("Frame")
+frame.Name = "Container"
+frame.Size = UDim2.new(0, 150, 0, 40)
+frame.Position = UDim2.new(0, 10, 0, 10)
+frame.AnchorPoint = Vector2.new(0,0)
+frame.BackgroundTransparency = 0.2
+frame.Parent = screenGui
+
+local button = Instance.new("TextButton")
+button.Name = "ToggleButton"
+button.Size = UDim2.new(1, -10, 1, -10)
+button.Position = UDim2.new(0, 5, 0, 5)
+button.AnchorPoint = Vector2.new(0,0)
+button.Text = "Toggle Highlights"
+button.Parent = frame
+
+-- Keep track of the last known state returned from server
+local highlightsOn = false
+
+button.MouseButton1Click:Connect(function()
+    -- Fire server to request toggle
+    toggleEvent:FireServer()
+    -- wait for server response to update button label (server will fire back)
+end)
+
+-- Optional: server will fire back to this client with the updated state
+toggleEvent.OnClientEvent:Connect(function(newState)
+    highlightsOn = newState
+    if highlightsOn then
+        button.Text = "Highlights: ON"
+    else
+        button.Text = "Highlights: OFF"
+    end
+end)
